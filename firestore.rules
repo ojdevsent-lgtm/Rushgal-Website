@@ -2,8 +2,16 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function isAdmin() {
-      return signedIn() && request.auth.token.admin == true;
+    function isAdmin() { return signedIn() && request.auth.token.admin == true; }
+    function validOrder() {
+      return request.resource.data.keys().hasAll(['customer','items','total','fulfilment','paymentMethod','status','createdAt'])
+        && request.resource.data.paymentMethod == 'pay_on_delivery'
+        && request.resource.data.status == 'new'
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.total is number
+        && request.resource.data.total >= 0
+        && request.resource.data.fulfilment in ['delivery','pickup'];
     }
 
     match /products/{productId} {
@@ -22,7 +30,7 @@ service cloud.firestore {
     }
 
     match /orders/{orderId} {
-      allow create: if true;
+      allow create: if validOrder();
       allow read, update, delete: if isAdmin();
     }
 
@@ -33,6 +41,11 @@ service cloud.firestore {
     match /siteContent/{contentId} {
       allow read: if true;
       allow create, update, delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
     }
   }
 }
