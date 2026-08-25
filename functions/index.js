@@ -8,7 +8,11 @@ setGlobalOptions({ region: 'europe-west1', maxInstances: 10 });
 const db = admin.firestore();
 
 function normalizePhone(value) {
-  return String(value || '').replace(/\D/g, '').replace(/^0+/, '');
+  const digits = String(value || '').replace(/\D/g, '');
+  // Compare Nigerian numbers consistently whether entered as 080..., 23480..., or +23480...
+  if (digits.startsWith('234') && digits.length >= 13) return digits.slice(-10);
+  if (digits.length >= 10) return digits.slice(-10);
+  return digits;
 }
 
 exports.trackOrder = onCall({ cors: true }, async (request) => {
