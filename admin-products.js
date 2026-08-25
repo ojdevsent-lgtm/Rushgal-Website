@@ -1,35 +1,12 @@
 import { db, storage } from './firebase.js';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js';
 import { ref, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-storage.js';
-
-const state={products:[]};
-const $=s=>document.querySelector(s);
-const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-const money=v=>`₦${Number(v||0).toLocaleString('en-NG')}`;
-
-async function load(){
-  const snap=await getDocs(collection(db,'products'));
-  state.products=snap.docs.map(d=>({id:d.id,...d.data()}));
-  render();
-}
-function render(){
-  const grid=$('#productManager'); if(!grid)return;
-  grid.innerHTML=state.products.length?state.products.map(p=>`<article class="product-admin-card"><img src="${p.image||p.images?.[0]||''}" alt=""><div><span>${esc(p.category||'Uncategorised')}</span><h3>${esc(p.name)}</h3><strong>${money(p.price)}</strong><p>${p.stock??0} in stock · ${p.status||'active'}</p><div><button data-edit="${p.id}">Edit</button><button data-delete="${p.id}" class="danger">Delete</button></div></div></article>`).join(''):`<div class="empty">No products yet. Add the first Rushgal product.</div>`;
-}
-function openForm(product={}){
-  const form=$('#productForm'); form.reset(); form.dataset.id=product.id||'';
-  for(const key of ['name','category','price','stock','description','status']) if(form.elements[key]) form.elements[key].value=product[key]??'';
-  $('#productImagePreview').src=product.image||product.images?.[0]||''; $('#productModal').classList.add('is-open');
-}
-function closeForm(){$('#productModal').classList.remove('is-open')}
-async function save(e){
-  e.preventDefault(); const f=e.currentTarget; const data=new FormData(f); const id=f.dataset.id;
-  const payload={name:data.get('name'),category:data.get('category'),price:Number(data.get('price')),stock:Number(data.get('stock')),description:data.get('description'),status:data.get('status')||'active',updatedAt:serverTimestamp()};
-  const file=f.elements.image.files[0];
-  if(file){const storageRef=ref(storage,`products/${crypto.randomUUID()}-${file.name}`);await uploadBytes(storageRef,file);payload.image=await getDownloadURL(storageRef)}
-  if(id)await updateDoc(doc(db,'products',id),payload);else await addDoc(collection(db,'products'),{...payload,createdAt:serverTimestamp()});
-  closeForm();await load();
-}
+const state={products:[]};const $=s=>document.querySelector(s);const money=v=>`₦${Number(v||0).toLocaleString('en-NG')}`;const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+async function load(){const snap=await getDocs(collection(db,'products'));state.products=snap.docs.map(d=>({id:d.id,...d.data()}));render()}
+function render(){const grid=$('#productManager');if(!grid)return;grid.innerHTML=state.products.length?state.products.map(p=>`<article class="product-admin-card"><img src="${p.images?.[0]||p.image||''}" alt=""><div><span>${esc(p.category||'Uncategorised')}</span><h3>${esc(p.name)}</h3><strong>${money(p.price)}</strong><p>${p.stock??0} stock · ${p.status||'active'} · ${(p.images||[]).length} images</p><div><button data-edit="${p.id}">Edit</button><button data-delete="${p.id}" class="danger">Delete</button></div></div></article>`).join(''):'<div class="empty">No products yet. Add the first Rushgal product.</div>'}
+function parseList(v){return v.split(',').map(x=>x.trim()).filter(Boolean)}
+function openForm(p={}){const f=$('#productForm');f.reset();f.dataset.id=p.id||'';for(const k of ['name','category','price','stock','description','status'])if(f.elements[k])f.elements[k].value=p[k]??'';$('#productSizes').value=(p.sizes||[]).join(', ');$('#productColours').value=(p.colours||[]).join(', ');$('#galleryPreview').innerHTML=(p.images||[p.image]).filter(Boolean).map(src=>`<img src="${src}" alt="">`).join('');$('#productModal').classList.add('is-open')}
+async function uploadGallery(files,id){const urls=[];for(const file of files){const r=ref(storage,`products/${id}/${crypto.randomUUID()}-${file.name}`);await uploadBytes(r,file);urls.push(await getDownloadURL(r))}return urls}
+async function save(e){e.preventDefault();const f=e.currentTarget,d=new FormData(f),id=f.dataset.id||doc(collection(db,'products')).id;const existing=state.products.find(p=>p.id===id)||{};const payload={name:d.get('name'),category:d.get('category'),price:Number(d.get('price')),stock:Number(d.get('stock')),description:d.get('description'),status:d.get('status')||'active',sizes:parseList(d.get('sizes')||''),colours:parseList(d.get('colours')||''),updatedAt:serverTimestamp()};const files=[...f.elements.gallery.files];if(files.length)payload.images=[...(existing.images||[]),...(await uploadGallery(files,id))];else payload.images=existing.images||[];payload.image=payload.images[0]||existing.image||'';if(existing.id)await updateDoc(doc(db,'products',id),payload);else await addDoc(collection(db,'products'),{...payload,createdAt:serverTimestamp()});$('#productModal').classList.remove('is-open');await load()}
 async function remove(id){if(!confirm('Delete this product?'))return;await deleteDoc(doc(db,'products',id));await load()}
-
-document.addEventListener('DOMContentLoaded',async()=>{await load();$('#addProduct')?.addEventListener('click',()=>openForm());$('#closeProduct')?.addEventListener('click',closeForm);$('#productForm')?.addEventListener('submit',save);$('#productManager')?.addEventListener('click',e=>{const edit=e.target.closest('[data-edit]');const del=e.target.closest('[data-delete]');if(edit)openForm(state.products.find(p=>p.id===edit.dataset.edit));if(del)remove(del.dataset.delete)})});
+document.addEventListener('DOMContentLoaded',async()=>{await load();$('#addProduct')?.addEventListener('click',()=>openForm());$('#addProduct2')?.addEventListener('click',()=>openForm());$('#closeProduct')?.addEventListener('click',()=>$('#productModal').classList.remove('is-open'));$('#productForm')?.addEventListener('submit',save);$('#productManager')?.addEventListener('click',e=>{const a=e.target.closest('[data-edit]'),d=e.target.closest('[data-delete]');if(a)openForm(state.products.find(p=>p.id===a.dataset.edit));if(d)remove(d.dataset.delete)})});
