@@ -24,7 +24,7 @@ exports.trackOrder = onCall({ cors: true }, async (request) => {
   }
 
   const snapshot = await db.collection('orders')
-    .where('trackingReference', '==', reference)
+    .where('trackingCode', '==', reference)
     .limit(1)
     .get();
 
@@ -32,8 +32,7 @@ exports.trackOrder = onCall({ cors: true }, async (request) => {
     throw new HttpsError('not-found', 'Order not found.');
   }
 
-  const doc = snapshot.docs[0];
-  const order = doc.data();
+  const order = snapshot.docs[0].data();
   const storedPhone = normalizePhone(order.customer?.phone);
 
   if (!storedPhone || storedPhone !== phone) {
@@ -48,6 +47,5 @@ exports.trackOrder = onCall({ cors: true }, async (request) => {
     createdAt: order.createdAt?.toDate?.()?.toISOString?.() || null,
     customerName: order.customer?.name || '',
     deliveryZone: order.deliveryZone?.name || '',
-    // Intentionally do not return phone, address, GPS coordinates, email, or item details.
   };
 });
