@@ -1,1 +1,0 @@
-Selectable sizes are implemented in admin-products.js. This marker is temporary and will be removed.
