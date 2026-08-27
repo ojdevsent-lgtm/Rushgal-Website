@@ -8,143 +8,15 @@ const $ = s => document.querySelector(s);
 const money = v => `₦${Number(v || 0).toLocaleString('en-NG')}`;
 const esc = v => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 
-async function load() {
-  await waitForAdmin();
-  const snap = await getDocs(collection(db, 'products'));
-  state.products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  render();
-  updateMetrics();
-}
+async function load() { await waitForAdmin(); const snap = await getDocs(collection(db,'products')); state.products=snap.docs.map(d=>({id:d.id,...d.data()})); render(); updateMetrics(); }
+function updateMetrics(){const c=$('#productCount'),l=$('#lowStockMetric');if(c)c.textContent=state.products.length;if(l)l.textContent=state.products.filter(p=>Number(p.stock||0)<=5&&p.status!=='draft').length;}
+function render(){const grid=$('#productManager');if(!grid)return;grid.innerHTML=state.products.length?state.products.map(p=>`<article class="product-admin-card"><img src="${esc(p.images?.[0]||p.image||'')}" alt=""><div><span>${esc(p.category||'Uncategorised')}</span><h3>${esc(p.name)}</h3><strong>${money(p.price)}</strong><p>${p.stock??0} stock · ${esc(p.status||'active')} · ${(p.images||[]).length} images</p><div><button type="button" data-edit="${p.id}">Edit</button><button type="button" data-delete="${p.id}" class="danger">Delete</button></div></div></article>`).join(''):'<div class="empty">No products yet. Add the first Rushgal product.</div>';}
+function parseList(v){return String(v||'').split(',').map(x=>x.trim()).filter(Boolean);}
+function openForm(p={}){const f=$('#productForm');if(!f)return;f.reset();f.dataset.id=p.id||'';for(const k of ['name','category','price','stock','description','status'])if(f.elements[k])f.elements[k].value=p[k]??'';$('#productSizes').value=(p.sizes||[]).join(', ');$('#productColours').value=(p.colours||[]).join(', ');$('#galleryPreview').innerHTML=(p.images||[p.image]).filter(Boolean).map(src=>`<img src="${esc(src)}" alt="">`).join('');$('#productModal').classList.add('is-open');}
 
-function updateMetrics() {
-  const count = $('#productCount'), lowStock = $('#lowStockMetric');
-  if (count) count.textContent = state.products.length;
-  if (lowStock) lowStock.textContent = state.products.filter(p => Number(p.stock || 0) <= 5 && p.status !== 'draft').length;
-}
+function compressImage(file,maxSide=1600,quality=.82){return new Promise((resolve,reject)=>{if(!file.type.startsWith('image/'))return reject(new Error(`${file.name} is not an image.`));const img=new Image();const url=URL.createObjectURL(file);img.onload=()=>{URL.revokeObjectURL(url);const scale=Math.min(1,maxSide/Math.max(img.width,img.height)),w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale));const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;canvas.getContext('2d').drawImage(img,0,0,w,h);canvas.toBlob(blob=>blob?resolve(new File([blob],file.name.replace(/\.[^.]+$/i,'.jpg'),{type:'image/jpeg'})):reject(new Error('Image compression failed.')),'image/jpeg',quality);};img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error(`Could not read ${file.name}.`));};img.src=url;});}
+async function uploadGallery(files,id){const urls=[];for(const file of files){const compressed=await compressImage(file);const safeName=compressed.name.replace(/[^a-zA-Z0-9._-]/g,'_');const r=ref(storage,`products/${id}/${Date.now()}-${safeName}`);await uploadBytes(r,compressed,{contentType:'image/jpeg'});urls.push(await getDownloadURL(r));}return urls;}
 
-function render() {
-  const grid = $('#productManager');
-  if (!grid) return;
-  grid.innerHTML = state.products.length ? state.products.map(p => `
-    <article class="product-admin-card">
-      <img src="${esc(p.images?.[0] || p.image || '')}" alt="">
-      <div>
-        <span>${esc(p.category || 'Uncategorised')}</span>
-        <h3>${esc(p.name)}</h3>
-        <strong>${money(p.price)}</strong>
-        <p>${p.stock ?? 0} stock · ${esc(p.status || 'active')} · ${(p.images || []).length} images</p>
-        <div><button type="button" data-edit="${p.id}">Edit</button><button type="button" data-delete="${p.id}" class="danger">Delete</button></div>
-      </div>
-    </article>`).join('') : '<div class="empty">No products yet. Add the first Rushgal product.</div>';
-}
-
-function parseList(v) {
-  return String(v || '').split(',').map(x => x.trim()).filter(Boolean);
-}
-
-function openForm(p = {}) {
-  const f = $('#productForm');
-  if (!f) return;
-  f.reset();
-  f.dataset.id = p.id || '';
-  for (const k of ['name','category','price','stock','description','status']) {
-    if (f.elements[k]) f.elements[k].value = p[k] ?? '';
-  }
-  $('#productSizes').value = (p.sizes || []).join(', ');
-  $('#productColours').value = (p.colours || []).join(', ');
-  $('#galleryPreview').innerHTML = (p.images || [p.image]).filter(Boolean).map(src => `<img src="${esc(src)}" alt="">`).join('');
-  $('#productModal').classList.add('is-open');
-}
-
-async function uploadGallery(files, id) {
-  const urls = [];
-  for (const file of files) {
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const r = ref(storage, `products/${id}/${Date.now()}-${safeName}`);
-    await uploadBytes(r, file);
-    urls.push(await getDownloadURL(r));
-  }
-  return urls;
-}
-
-async function save(e) {
-  e.preventDefault();
-  const button = e.submitter || e.currentTarget.querySelector('button[type="submit"]');
-  if (button) { button.disabled = true; button.textContent = 'Saving…'; }
-
-  try {
-    const f = e.currentTarget;
-    const d = new FormData(f);
-    const id = f.dataset.id || doc(collection(db, 'products')).id;
-    const existing = state.products.find(p => p.id === id) || {};
-
-    await waitForAdmin();
-
-    const name = String(d.get('name') || '').trim();
-    const category = String(d.get('category') || '').trim();
-    const price = Number(d.get('price'));
-    const stock = Number(d.get('stock'));
-    if (!name || !category || !Number.isFinite(price) || price < 0 || !Number.isFinite(stock) || stock < 0) {
-      throw new Error('Enter a valid product name, category, price and stock.');
-    }
-
-    // Write Firestore first. A Storage problem must never prevent creation of the product.
-    const baseImages = existing.images || [];
-    const payload = {
-      name,
-      category,
-      price,
-      stock,
-      description: String(d.get('description') || '').trim(),
-      status: String(d.get('status') || 'active'),
-      sizes: parseList(d.get('sizes')),
-      colours: parseList(d.get('colours')),
-      images: baseImages,
-      image: baseImages[0] || existing.image || '',
-      updatedAt: serverTimestamp()
-    };
-
-    await setDoc(doc(db, 'products', id), existing.id ? payload : { ...payload, createdAt: serverTimestamp() }, { merge: true });
-
-    // Images are optional. If Storage is unavailable/blocked, keep the product saved.
-    const files = f.elements.gallery?.files ? [...f.elements.gallery.files] : [];
-    if (files.length) {
-      try {
-        const images = [...baseImages, ...(await uploadGallery(files, id))];
-        await updateDoc(doc(db, 'products', id), { images, image: images[0] || '' });
-      } catch (imageError) {
-        console.error('Product image upload failed:', imageError);
-        alert(`Product saved successfully, but the image could not be uploaded. You can fix Firebase Storage later.\n\n${imageError?.message || 'Storage upload failed.'}`);
-      }
-    }
-
-    $('#productModal').classList.remove('is-open');
-    await load();
-  } catch (error) {
-    console.error('Product save failed:', error);
-    alert(`Could not save product: ${error?.message || 'Unknown error'}`);
-  } finally {
-    if (button) { button.disabled = false; button.textContent = 'Save product'; }
-  }
-}
-
-async function remove(id) {
-  if (!confirm('Delete this product?')) return;
-  await waitForAdmin();
-  await deleteDoc(doc(db, 'products', id));
-  await load();
-}
-
-document.addEventListener('DOMContentLoaded', async () => {
-  try { await load(); } catch (error) { console.error('Product manager failed to load:', error); }
-  $('#addProduct')?.addEventListener('click', () => openForm());
-  $('#addProduct2')?.addEventListener('click', () => openForm());
-  $('#closeProduct')?.addEventListener('click', () => $('#productModal').classList.remove('is-open'));
-  $('#productForm')?.addEventListener('submit', save);
-  $('#productManager')?.addEventListener('click', e => {
-    const edit = e.target.closest('[data-edit]');
-    const del = e.target.closest('[data-delete]');
-    if (edit) openForm(state.products.find(p => p.id === edit.dataset.edit));
-    if (del) remove(del.dataset.delete);
-  });
-});
+async function save(e){e.preventDefault();const button=e.submitter||e.currentTarget.querySelector('button[type="submit"]');if(button){button.disabled=true;button.textContent='Saving…';}try{const f=e.currentTarget,d=new FormData(f),id=f.dataset.id||doc(collection(db,'products')).id,existing=state.products.find(p=>p.id===id)||{};await waitForAdmin();const name=String(d.get('name')||'').trim(),category=String(d.get('category')||'').trim(),price=Number(d.get('price')),stock=Number(d.get('stock'));if(!name||!category||!Number.isFinite(price)||price<0||!Number.isFinite(stock)||stock<0)throw new Error('Enter a valid product name, category, price and stock.');const baseImages=existing.images||[];const payload={name,category,price,stock,description:String(d.get('description')||'').trim(),status:String(d.get('status')||'active'),sizes:parseList(d.get('sizes')),colours:parseList(d.get('colours')),images:baseImages,image:baseImages[0]||existing.image||'',updatedAt:serverTimestamp()};await setDoc(doc(db,'products',id),existing.id?payload:{...payload,createdAt:serverTimestamp()},{merge:true});const files=f.elements.gallery?.files?[...f.elements.gallery.files]:[];if(files.length){try{const images=[...baseImages,...(await uploadGallery(files,id))];await updateDoc(doc(db,'products',id),{images,image:images[0]||''});}catch(imageError){console.error('Product image upload failed:',imageError);alert(`Product saved, but the image could not be uploaded. ${imageError?.message||'Storage upload failed.'}`);}}$('#productModal').classList.remove('is-open');await load();}catch(error){console.error('Product save failed:',error);alert(`Could not save product: ${error?.message||'Unknown error'}`);}finally{if(button){button.disabled=false;button.textContent='Save product';}}}
+async function remove(id){if(!confirm('Delete this product?'))return;await waitForAdmin();await deleteDoc(doc(db,'products',id));await load();}
+document.addEventListener('DOMContentLoaded',async()=>{try{await load();}catch(error){console.error('Product manager failed to load:',error);}$('#addProduct')?.addEventListener('click',()=>openForm());$('#addProduct2')?.addEventListener('click',()=>openForm());$('#closeProduct')?.addEventListener('click',()=>$('#productModal').classList.remove('is-open'));$('#productForm')?.addEventListener('submit',save);$('#productManager')?.addEventListener('click',e=>{const edit=e.target.closest('[data-edit]'),del=e.target.closest('[data-delete]');if(edit)openForm(state.products.find(p=>p.id===edit.dataset.edit));if(del)remove(del.dataset.delete);});});
