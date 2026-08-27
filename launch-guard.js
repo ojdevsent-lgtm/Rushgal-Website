@@ -6,6 +6,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('checkoutForm'); if (!form) return;
     form.addEventListener('submit', async event => {
+      if (form.dataset.availabilityVerified === '1') { delete form.dataset.availabilityVerified; return; }
       const cart = readCart(); if (!cart.length) return;
       const firestoreItems = cart.filter(item => item.id && !String(item.id).startsWith('local-'));
       if (!firestoreItems.length) return;
@@ -19,24 +20,14 @@
         const products = new Map(snap.docs.map(doc => [doc.id, { id: doc.id, ...doc.data() }]));
         const unavailable = [];
         firestoreItems.forEach(item => {
-          const product = products.get(item.id);
-          const stock = Number(product?.stock);
-          const active = product?.active !== false && product?.available !== false && product?.inStock !== false;
-          const qty = Math.max(1, Number(item.qty || 1));
+          const product = products.get(item.id); const stock = Number(product?.stock); const active = product?.active !== false && product?.available !== false && product?.inStock !== false; const qty = Math.max(1, Number(item.qty || 1));
           if (!product || !active || (Number.isFinite(stock) && stock >= 0 && stock < qty)) unavailable.push(product?.name || item.name || 'A selected item');
         });
-        if (unavailable.length) {
-          message(`Please update your bag. ${unavailable.join(', ')} is no longer available in the selected quantity.`);
-          return;
-        }
-        message('Availability confirmed. Submitting your order…');
-        form.removeEventListener('submit', arguments.callee);
-        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-        form.dispatchEvent(submitEvent);
-      } catch (error) {
-        console.error('Availability check failed', error);
-        message('We could not verify stock right now. Please try again.');
-      } finally { if (submit) submit.disabled = false; }
+        if (unavailable.length) { message(`Please update your bag. ${unavailable.join(', ')} is no longer available in the selected quantity.`); return; }
+        form.dataset.availabilityVerified = '1';
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      } catch (error) { console.error('Availability check failed', error); message('We could not verify stock right now. Please try again.'); }
+      finally { if (submit) submit.disabled = false; }
     }, true);
   });
 })();
