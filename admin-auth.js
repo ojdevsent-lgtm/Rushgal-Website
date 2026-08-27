@@ -1,5 +1,6 @@
-import { auth } from './firebase.js';
+import { auth, db } from './firebase.js';
 import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js';
+import { doc, getDoc } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js';
 
 let pending;
 
@@ -14,8 +15,11 @@ export function waitForAdmin() {
         return;
       }
       try {
-        const token = await user.getIdTokenResult(true);
-        if (token.claims.admin !== true) {
+        const adminRef = doc(db, 'admin_user', user.uid);
+        const adminSnap = await getDoc(adminRef);
+        const data = adminSnap.exists() ? adminSnap.data() : null;
+        const authorized = data?.active === true && data?.role === 'admin';
+        if (!authorized) {
           window.location.href = 'admin-login.html?error=unauthorized';
           reject(new Error('Admin access required'));
           return;
