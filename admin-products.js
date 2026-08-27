@@ -73,11 +73,12 @@ async function save(e) {
   if (button) { button.disabled = true; button.textContent = 'Saving…'; }
 
   try {
-    await waitForAdmin();
     const f = e.currentTarget;
     const d = new FormData(f);
     const id = f.dataset.id || doc(collection(db, 'products')).id;
     const existing = state.products.find(p => p.id === id) || {};
+
+    await waitForAdmin();
 
     const name = String(d.get('name') || '').trim();
     const category = String(d.get('category') || '').trim();
@@ -87,10 +88,8 @@ async function save(e) {
       throw new Error('Enter a valid product name, category, price and stock.');
     }
 
-    const files = f.elements.gallery?.files ? [...f.elements.gallery.files] : [];
-    let images = existing.images || [];
-    if (files.length) images = [...images, ...(await uploadGallery(files, id))];
-
+    // Write Firestore first. A Storage problem must never prevent creation of the product.
+    const baseImages = existing.images || [];
     const payload = {
       name,
       category,
@@ -100,12 +99,25 @@ async function save(e) {
       status: String(d.get('status') || 'active'),
       sizes: parseList(d.get('sizes')),
       colours: parseList(d.get('colours')),
-      images,
-      image: images[0] || existing.image || '',
+      images: baseImages,
+      image: baseImages[0] || existing.image || '',
       updatedAt: serverTimestamp()
     };
 
     await setDoc(doc(db, 'products', id), existing.id ? payload : { ...payload, createdAt: serverTimestamp() }, { merge: true });
+
+    // Images are optional. If Storage is unavailable/blocked, keep the product saved.
+    const files = f.elements.gallery?.files ? [...f.elements.gallery.files] : [];
+    if (files.length) {
+      try {
+        const images = [...baseImages, ...(await uploadGallery(files, id))];
+        await updateDoc(doc(db, 'products', id), { images, image: images[0] || '' });
+      } catch (imageError) {
+        console.error('Product image upload failed:', imageError);
+        alert(`Product saved successfully, but the image could not be uploaded. You can fix Firebase Storage later.\n\n${imageError?.message || 'Storage upload failed.'}`);
+      }
+    }
+
     $('#productModal').classList.remove('is-open');
     await load();
   } catch (error) {
