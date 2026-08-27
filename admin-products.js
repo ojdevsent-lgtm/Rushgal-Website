@@ -1,14 +1,138 @@
 import { db, storage } from './firebase.js';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js';
+import { collection, getDocs, setDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js';
 import { ref, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-storage.js';
 import { waitForAdmin } from './admin-auth.js';
-const state={products:[]};const $=s=>document.querySelector(s);const money=v=>`₦${Number(v||0).toLocaleString('en-NG')}`;const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-async function load(){await waitForAdmin();const snap=await getDocs(collection(db,'products'));state.products=snap.docs.map(d=>({id:d.id,...d.data()}));render();updateMetrics()}
-function updateMetrics(){const count=$('#productCount'),low=$('#lowStockMetric');if(count)count.textContent=state.products.length;if(low)low.textContent=state.products.filter(p=>Number(p.stock||0)<=5&&p.status!=='draft').length}
-function render(){const grid=$('#productManager');if(!grid)return;grid.innerHTML=state.products.length?state.products.map(p=>`<article class="product-admin-card"><img src="${p.images?.[0]||p.image||''}" alt=""><div><span>${esc(p.category||'Uncategorised')}</span><h3>${esc(p.name)}</h3><strong>${money(p.price)}</strong><p>${p.stock??0} stock · ${p.status||'active'} · ${(p.images||[]).length} images</p><div><button data-edit="${p.id}">Edit</button><button data-delete="${p.id}" class="danger">Delete</button></div></div></article>`).join(''):'<div class="empty">No products yet. Add the first Rushgal product.</div>'}
-function parseList(v){return v.split(',').map(x=>x.trim()).filter(Boolean)}
-function openForm(p={}){const f=$('#productForm');f.reset();f.dataset.id=p.id||'';for(const k of ['name','category','price','stock','description','status'])if(f.elements[k])f.elements[k].value=p[k]??'';$('#productSizes').value=(p.sizes||[]).join(', ');$('#productColours').value=(p.colours||[]).join(', ');$('#galleryPreview').innerHTML=(p.images||[p.image]).filter(Boolean).map(src=>`<img src="${src}" alt="">`).join('');$('#productModal').classList.add('is-open')}
-async function uploadGallery(files,id){const urls=[];for(const file of files){const r=ref(storage,`products/${id}/${crypto.randomUUID()}-${file.name}`);await uploadBytes(r,file);urls.push(await getDownloadURL(r))}return urls}
-async function save(e){e.preventDefault();await waitForAdmin();const f=e.currentTarget,d=new FormData(f),id=f.dataset.id||doc(collection(db,'products')).id;const existing=state.products.find(p=>p.id===id)||{};const payload={name:d.get('name'),category:d.get('category'),price:Number(d.get('price')),stock:Number(d.get('stock')),description:d.get('description'),status:d.get('status')||'active',sizes:parseList(d.get('sizes')||''),colours:parseList(d.get('colours')||''),updatedAt:serverTimestamp()};const files=[...f.elements.gallery.files];if(files.length)payload.images=[...(existing.images||[]),...(await uploadGallery(files,id))];else payload.images=existing.images||[];payload.image=payload.images[0]||existing.image||'';if(existing.id)await updateDoc(doc(db,'products',id),payload);else await addDoc(collection(db,'products'),{...payload,createdAt:serverTimestamp()});$('#productModal').classList.remove('is-open');await load()}
-async function remove(id){if(!confirm('Delete this product?'))return;await waitForAdmin();await deleteDoc(doc(db,'products',id));await load()}
-document.addEventListener('DOMContentLoaded',async()=>{await load();$('#addProduct')?.addEventListener('click',()=>openForm());$('#addProduct2')?.addEventListener('click',()=>openForm());$('#closeProduct')?.addEventListener('click',()=>$('#productModal').classList.remove('is-open'));$('#productForm')?.addEventListener('submit',save);$('#productManager')?.addEventListener('click',e=>{const a=e.target.closest('[data-edit]'),d=e.target.closest('[data-delete]');if(a)openForm(state.products.find(p=>p.id===a.dataset.edit));if(d)remove(d.dataset.delete)})});
+
+const state = { products: [] };
+const $ = s => document.querySelector(s);
+const money = v => `₦${Number(v || 0).toLocaleString('en-NG')}`;
+const esc = v => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+
+async function load() {
+  await waitForAdmin();
+  const snap = await getDocs(collection(db, 'products'));
+  state.products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  render();
+  updateMetrics();
+}
+
+function updateMetrics() {
+  const count = $('#productCount'), lowStock = $('#lowStockMetric');
+  if (count) count.textContent = state.products.length;
+  if (lowStock) lowStock.textContent = state.products.filter(p => Number(p.stock || 0) <= 5 && p.status !== 'draft').length;
+}
+
+function render() {
+  const grid = $('#productManager');
+  if (!grid) return;
+  grid.innerHTML = state.products.length ? state.products.map(p => `
+    <article class="product-admin-card">
+      <img src="${esc(p.images?.[0] || p.image || '')}" alt="">
+      <div>
+        <span>${esc(p.category || 'Uncategorised')}</span>
+        <h3>${esc(p.name)}</h3>
+        <strong>${money(p.price)}</strong>
+        <p>${p.stock ?? 0} stock · ${esc(p.status || 'active')} · ${(p.images || []).length} images</p>
+        <div><button type="button" data-edit="${p.id}">Edit</button><button type="button" data-delete="${p.id}" class="danger">Delete</button></div>
+      </div>
+    </article>`).join('') : '<div class="empty">No products yet. Add the first Rushgal product.</div>';
+}
+
+function parseList(v) {
+  return String(v || '').split(',').map(x => x.trim()).filter(Boolean);
+}
+
+function openForm(p = {}) {
+  const f = $('#productForm');
+  if (!f) return;
+  f.reset();
+  f.dataset.id = p.id || '';
+  for (const k of ['name','category','price','stock','description','status']) {
+    if (f.elements[k]) f.elements[k].value = p[k] ?? '';
+  }
+  $('#productSizes').value = (p.sizes || []).join(', ');
+  $('#productColours').value = (p.colours || []).join(', ');
+  $('#galleryPreview').innerHTML = (p.images || [p.image]).filter(Boolean).map(src => `<img src="${esc(src)}" alt="">`).join('');
+  $('#productModal').classList.add('is-open');
+}
+
+async function uploadGallery(files, id) {
+  const urls = [];
+  for (const file of files) {
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const r = ref(storage, `products/${id}/${Date.now()}-${safeName}`);
+    await uploadBytes(r, file);
+    urls.push(await getDownloadURL(r));
+  }
+  return urls;
+}
+
+async function save(e) {
+  e.preventDefault();
+  const button = e.submitter || e.currentTarget.querySelector('button[type="submit"]');
+  if (button) { button.disabled = true; button.textContent = 'Saving…'; }
+
+  try {
+    await waitForAdmin();
+    const f = e.currentTarget;
+    const d = new FormData(f);
+    const id = f.dataset.id || doc(collection(db, 'products')).id;
+    const existing = state.products.find(p => p.id === id) || {};
+
+    const name = String(d.get('name') || '').trim();
+    const category = String(d.get('category') || '').trim();
+    const price = Number(d.get('price'));
+    const stock = Number(d.get('stock'));
+    if (!name || !category || !Number.isFinite(price) || price < 0 || !Number.isFinite(stock) || stock < 0) {
+      throw new Error('Enter a valid product name, category, price and stock.');
+    }
+
+    const files = f.elements.gallery?.files ? [...f.elements.gallery.files] : [];
+    let images = existing.images || [];
+    if (files.length) images = [...images, ...(await uploadGallery(files, id))];
+
+    const payload = {
+      name,
+      category,
+      price,
+      stock,
+      description: String(d.get('description') || '').trim(),
+      status: String(d.get('status') || 'active'),
+      sizes: parseList(d.get('sizes')),
+      colours: parseList(d.get('colours')),
+      images,
+      image: images[0] || existing.image || '',
+      updatedAt: serverTimestamp()
+    };
+
+    await setDoc(doc(db, 'products', id), existing.id ? payload : { ...payload, createdAt: serverTimestamp() }, { merge: true });
+    $('#productModal').classList.remove('is-open');
+    await load();
+  } catch (error) {
+    console.error('Product save failed:', error);
+    alert(`Could not save product: ${error?.message || 'Unknown error'}`);
+  } finally {
+    if (button) { button.disabled = false; button.textContent = 'Save product'; }
+  }
+}
+
+async function remove(id) {
+  if (!confirm('Delete this product?')) return;
+  await waitForAdmin();
+  await deleteDoc(doc(db, 'products', id));
+  await load();
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  try { await load(); } catch (error) { console.error('Product manager failed to load:', error); }
+  $('#addProduct')?.addEventListener('click', () => openForm());
+  $('#addProduct2')?.addEventListener('click', () => openForm());
+  $('#closeProduct')?.addEventListener('click', () => $('#productModal').classList.remove('is-open'));
+  $('#productForm')?.addEventListener('submit', save);
+  $('#productManager')?.addEventListener('click', e => {
+    const edit = e.target.closest('[data-edit]');
+    const del = e.target.closest('[data-delete]');
+    if (edit) openForm(state.products.find(p => p.id === edit.dataset.edit));
+    if (del) remove(del.dataset.delete);
+  });
+});
